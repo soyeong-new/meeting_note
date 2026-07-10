@@ -73,6 +73,48 @@
 - **요약: Gemini API 유지** — STT로 이미 텍스트화된 스크립트만 전송하므로 음성 정보(화자 목소리 등) 유출 리스크가 없고, 요약/액션아이템 품질이 로컬 오픈소스 LLM보다 안정적이라 판단.
 - **코드 영역 확장** — 원래는 챗봇만 코드로 구현할 계획이었으나, STT를 로컬로 옮기면서 자체 처리 서버(파이프라인 오케스트레이션 포함) 전체가 코드 영역이 됨. Softr(UI)·Xano(DB)·Make(내보내기)는 여전히 노코드로 유지.
 
+## 5-1. Xano 데이터 스키마 (2026-07-10 초안)
+
+Xano 스키마는 언제든 필드 추가/삭제가 가능(Postgres 기반)하므로 완벽하게 짤 필요 없이 아래를 시작점으로 삼는다.
+
+### `users`
+| 필드명 | 타입 | 설명 |
+|---|---|---|
+| id | auto | PK |
+| name | text | 이름 |
+| email | text | 로그인 식별자 |
+| created_at | timestamp | 가입일 |
+
+### `meetings`
+| 필드명 | 타입 | 설명 |
+|---|---|---|
+| id | auto | PK |
+| title | text | 회의 제목 |
+| meeting_date | timestamp | 회의 일시 |
+| recorder_id | FK → users | 녹음한 사람 |
+| script | long text | STT 전체 스크립트 (batiai/stt 결과) |
+| summary | long text | 3줄 요약 (Gemini 결과) |
+| action_items | JSON | 담당자·할일·마감일 배열 |
+| status | text (enum) | `recording_done` → `transcribing` → `summarizing` → `done` / `failed` — 자체 처리 서버가 비동기로 파이프라인을 수행하는 동안 대시보드에 진행 상태를 보여주기 위해 필요 |
+| notion_exported | bool | 노션 내보내기 여부 |
+| slack_exported | bool | 슬랙 내보내기 여부 |
+| created_at | timestamp | 생성일 |
+
+### `meeting_participants` (다대다 조인 테이블)
+| 필드명 | 타입 | 설명 |
+|---|---|---|
+| id | auto | PK |
+| meeting_id | FK → meetings | |
+| user_id | FK → users | |
+
+**대시보드 필터링**: `meeting_participants`에서 `user_id = 현재 로그인 유저`인 행의 `meeting_id`로 `meetings`를 조회.
+
+### 인증 방식
+
+- 팀이 이미 Google Workspace를 쓰므로, Softr 로그인은 **구글 OAuth**로 구현 (이메일/비밀번호 가입·인증메일 불필요).
+- **회사 도메인으로 로그인 제한**을 걸어 외부 구글 계정의 가입을 차단한다.
+- Xano 플랫폼 계정은 빌더(설계자) 1인만 필요 — 팀원은 Xano를 직접 보거나 가입하지 않고 Softr 사이트만 이용한다.
+
 ## 6. 로드맵
 
 1. **Xano DB 설계**: 회의록 테이블(제목/스크립트/요약/액션아이템/참석자 관계) + 유저 테이블 설계.
