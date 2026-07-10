@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>녹음 스파이크</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; text-align: center; }
+  button { font-size: 18px; padding: 16px 32px; border-radius: 12px; border: none; margin: 12px; }
+  #recordBtn { background: #e53935; color: white; }
+  #recordBtn.recording { background: #555; }
+  #status { margin: 16px; color: #555; }
+  audio { width: 100%; margin-top: 16px; }
+  #info { font-size: 13px; color: #888; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h2>녹음 스파이크</h2>
+  <p>버튼 하나로 마이크 녹음이 되는지만 확인하는 최소 테스트</p>
+  <button id="recordBtn">녹음 시작</button>
+  <div id="status">대기 중</div>
+  <audio id="playback" controls style="display:none"></audio>
+  <div id="info"></div>
+  <div><a id="downloadLink" style="display:none">파일 다운로드 (직접 열어서 확인)</a></div>
+
+  <script>
+    let mediaRecorder, chunks = [], stream;
+    const btn = document.getElementById('recordBtn');
+    const status = document.getElementById('status');
+    const playback = document.getElementById('playback');
+    const info = document.getElementById('info');
+    const downloadLink = document.getElementById('downloadLink');
+
+    const CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/mpeg'];
+    function pickMimeType() {
+      if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+      return CANDIDATES.find(t => MediaRecorder.isTypeSupported(t)) || '';
+    }
+
+    btn.addEventListener('click', async () => {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+          status.textContent = '마이크 권한 실패: ' + err.message;
+          return;
+        }
+        chunks = [];
+        const mimeType = pickMimeType();
+        info.textContent = `선택된 포맷: ${mimeType || '(브라우저 기본값)'}`;
+        try {
+          mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+        } catch (err) {
+          status.textContent = 'MediaRecorder 생성 실패: ' + err.message;
+          return;
+        }
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          if (chunks.length === 0) {
+            status.textContent = '녹음 데이터가 비어있음 (chunks 0개) — 브라우저 호환성 문제로 보임';
+            return;
+          }
+          const blob = new Blob(chunks, { type: mediaRecorder.mimeType || mimeType });
+          const url = URL.createObjectURL(blob);
+          playback.src = url;
+          playback.style.display = 'block';
+          playback.load();
+          // Chrome/일부 브라우저는 MediaRecorder blob에 duration이 안 들어있어 0:00으로 보임 — 강제 계산
+          playback.onloadedmetadata = () => {
+            if (playback.duration === Infinity || isNaN(playback.duration)) {
+              playback.currentTime = 1e101;
+              playback.ontimeupdate = () => {
+                playback.ontimeupdate = null;
+                playback.currentTime = 0;
+              };
+            }
+          };
+          const ext = (blob.type.split('/')[1] || 'webm').split(';')[0];
+          downloadLink.href = url;
+          downloadLink.download = `recording.${ext}`;
+          downloadLink.style.display = 'inline-block';
+          info.textContent = `형식: ${blob.type || '(빈 문자열)'} / 크기: ${(blob.size / 1024).toFixed(1)}KB / 청크 수: ${chunks.length}`;
+          stream.getTracks().forEach(t => t.stop());
+        };
+        mediaRecorder.onerror = e => { status.textContent = '녹음 에러: ' + e.error; };
+        mediaRecorder.start();
+        btn.textContent = '녹음 중지';
+        btn.classList.add('recording');
+        status.textContent = '녹음 중...';
+      } else {
+        mediaRecorder.stop();
+        btn.textContent = '녹음 시작';
+        btn.classList.remove('recording');
+        status.textContent = '녹음 완료 — 아래에서 재생해보세요';
+      }
+    });
+  </script>
+</body>
+</html>
